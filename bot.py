@@ -5,25 +5,20 @@ import json
 import time
 import os
 import io
-
+import humanize
 from config import BOT_TOKEN, OWNER_ID, LOGS_CHAT_ID, MASK_LOG_URLS, MAX_DOCS_DISPLAY, MAX_EXPORT_DOCS
 import database as db
 from mongo_helper import MongoHelper, mask_mongo_url
-
 # Initialize Bot
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
-
 # In-memory dictionary for user input states
 USER_STATES = {}
 # Temporary data store for users during complex multi-step inputs (e.g. doc editing)
 USER_TEMP_DATA = {}
-
 # Help text message
 HELP_TEXT = """
 🔥 <b>MongoDB URL Reader - Advanced Telegram Bot Features</b>
-
 Welcome to the ultimate MongoDB management companion. Connect once, manage indefinitely!
-
 🚀 <b>Core Capabilities:</b>
 1. <b>Easy Connection:</b> Paste any <code>mongodb://</code> or <code>mongodb+srv://</code> connection string.
 2. <b>Database Explorer:</b> Browse all databases, see disk sizes, and access collections.
@@ -39,14 +34,11 @@ Welcome to the ultimate MongoDB management companion. Connect once, manage indef
 6. <b>Indexes Manager:</b> List existing indexes, create compound/unique indexes, and drop unused ones.
 7. <b>High-Speed Export:</b> Export collection records to a neat JSON file.
 8. <b>Full Logging:</b> Real-time logs are pushed to the administrator logs channel keeping actions transparent.
-
 ⚠️ <b>Quick Disconnect:</b> Send /disconnect or click the disconnect button to clear your session credentials from the database.
 """
-
 # Helper to escape HTML characters
 def safe_html(text):
     return html.escape(str(text))
-
 # Logger function to log user actions to Logs Channel
 def log_action(user, action, details=None):
     try:
@@ -72,7 +64,6 @@ def log_action(user, action, details=None):
         bot.send_message(LOGS_CHAT_ID, log_message)
     except Exception as e:
         print(f"Logging error: {e}")
-
 # Check if user has an active MongoDB session and return client
 def get_mongo_client(user_id):
     session = db.get_session(user_id)
@@ -85,7 +76,6 @@ def get_mongo_client(user_id):
         return None, f"❌ <b>Connection Refused:</b>\n<code>{safe_html(msg)}</code>\n\nYour session was disconnected due to authentication/network issues. Send a new connection string to reconnect."
         
     return helper, session
-
 # Standard connection status panel builder
 def get_main_dashboard_markup(session_info=None):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -98,9 +88,7 @@ def get_main_dashboard_markup(session_info=None):
         InlineKeyboardButton("🔌 Disconnect Session", callback_data="action_disconnect")
     )
     return markup
-
 # ----------------- Command Handlers -----------------
-
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user = message.from_user
@@ -123,12 +111,10 @@ def handle_start(message):
         bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_dashboard_markup(session))
     else:
         bot.send_message(message.chat.id, welcome_text)
-
 @bot.message_handler(commands=['help'])
 def handle_help(message):
     log_action(message.from_user, "Requested Help Guide")
     bot.send_message(message.chat.id, HELP_TEXT)
-
 @bot.message_handler(commands=['disconnect'])
 def handle_disconnect_cmd(message):
     user_id = message.from_user.id
@@ -140,7 +126,6 @@ def handle_disconnect_cmd(message):
         bot.send_message(message.chat.id, "🔌 <b>Database Disconnected.</b> Your session variables and connection URI have been completely deleted from our system cache.")
     else:
         bot.send_message(message.chat.id, "ℹ️ You do not have any active MongoDB sessions running.")
-
 @bot.message_handler(commands=['stats'])
 def handle_stats(message):
     user_id = message.from_user.id
@@ -155,7 +140,6 @@ def handle_stats(message):
         f"👥 <b>Total Registered Users:</b> {users_count}\n"
         f"⚙️ <b>Active Cache Databases:</b> SQLite 3"
     )
-
 @bot.message_handler(commands=['broadcast'])
 def handle_broadcast(message):
     user_id = message.from_user.id
@@ -171,7 +155,6 @@ def handle_broadcast(message):
         
     broadcast_msg = parts[1]
     execute_broadcast(broadcast_msg, user_id)
-
 def execute_broadcast(text, owner_id):
     users = db.get_all_users()
     bot.send_message(owner_id, f"⚡ <b>Sending Broadcast to {len(users)} users...</b>")
@@ -189,9 +172,7 @@ def execute_broadcast(text, owner_id):
             
     log_action(bot.get_chat(owner_id), "Executed Broadcast Message", f"Content: {text[:200]}\nSuccess: {success}, Failed: {failed}")
     bot.send_message(owner_id, f"✅ <b>Broadcast Completed!</b>\n\n🟢 Successful: {success}\n🔴 Failed: {failed}")
-
 # ----------------- Document Input Handlers -----------------
-
 @bot.message_handler(func=lambda message: True)
 def handle_text_inputs(message):
     user = message.from_user
@@ -207,7 +188,6 @@ def handle_text_inputs(message):
         if session:
             bot.send_message(message.chat.id, "📊 Session active.", reply_markup=get_main_dashboard_markup(session))
         return
-
     # Check states
     state = USER_STATES.get(user_id)
     
@@ -239,7 +219,6 @@ def handle_text_inputs(message):
             bot.send_message(message.chat.id, f"❌ <b>Connection Failed:</b>\n<code>{safe_html(msg)}</code>\n\nPlease double check credentials and firewall settings.")
         helper.close()
         return
-
     # For other states, we need an active DB connection
     if state:
         helper, session = get_mongo_client(user_id)
@@ -298,7 +277,6 @@ def handle_text_inputs(message):
             else:
                 bot.send_message(message.chat.id, f"❌ <b>Update Error:</b>\n<code>{safe_html(msg)}</code>")
             send_collection_dashboard(message.chat.id, helper, current_db, current_coll)
-
         # 7. Create Index
         elif state == "WAITING_FOR_CREATE_INDEX":
             USER_STATES.pop(user_id, None)
@@ -314,7 +292,6 @@ def handle_text_inputs(message):
             else:
                 bot.send_message(message.chat.id, f"❌ <b>Index Creation Error:</b>\n<code>{safe_html(msg)}</code>")
             send_indexes_menu(message.chat.id, helper, current_db, current_coll)
-
         # 8. Custom Find Query
         elif state == "WAITING_FOR_FIND_QUERY":
             USER_STATES.pop(user_id, None)
@@ -334,7 +311,6 @@ def handle_text_inputs(message):
             else:
                 bot.send_message(message.chat.id, f"❌ <b>Query Error:</b>\n<code>{safe_html(res)}</code>")
             send_collection_dashboard(message.chat.id, helper, current_db, current_coll)
-
         # 9. Custom Aggregation Pipeline
         elif state == "WAITING_FOR_AGGREGATION":
             USER_STATES.pop(user_id, None)
@@ -357,16 +333,13 @@ def handle_text_inputs(message):
             
         helper.close()
         return
-
     # Fallback default response
     bot.send_message(
         message.chat.id,
         "💡 <b>Tip:</b> If you want to connect to a new database, send its connection URL starting with <code>mongodb://</code> or <code>mongodb+srv://</code>.\n"
         "Otherwise, select an option from the keyboards above or check /help."
     )
-
 # ----------------- Custom Visual UI Dashboards -----------------
-
 def send_collection_dashboard(chat_id, helper, db_name, coll_name):
     # Retrieve count and size
     success, collections = helper.list_collections(db_name)
@@ -376,7 +349,6 @@ def send_collection_dashboard(chat_id, helper, db_name, coll_name):
             if c["name"] == coll_name:
                 coll_info = c
                 break
-
     text = (
         f"📄 <b>Collection Manager</b>\n\n"
         f"📁 <b>Database:</b> <code>{safe_html(db_name)}</code>\n"
@@ -385,7 +357,6 @@ def send_collection_dashboard(chat_id, helper, db_name, coll_name):
         f"💾 <b>Storage Size:</b> <code>{coll_info['readable_size']}</code>\n\n"
         f"Select a command from the control grid below:"
     )
-
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🔍 View Documents", callback_data="nav_docs:0"),
@@ -408,7 +379,6 @@ def send_collection_dashboard(chat_id, helper, db_name, coll_name):
         InlineKeyboardButton("🔙 Back to DB", callback_data=f"sel_db:{db_name}")
     )
     bot.send_message(chat_id, text, reply_markup=markup)
-
 def send_indexes_menu(chat_id, helper, db_name, coll_name):
     success, indexes = helper.get_indexes(db_name, coll_name)
     if not success:
@@ -430,9 +400,7 @@ def send_indexes_menu(chat_id, helper, db_name, coll_name):
         InlineKeyboardButton("🔙 Back to Collection", callback_data="nav_back_coll")
     )
     bot.send_message(chat_id, text, reply_markup=markup)
-
 # ----------------- Inline Keyboard Callbacks -----------------
-
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user = call.from_user
@@ -457,7 +425,6 @@ def handle_callbacks(call):
             text="🔌 <b>Session Disconnected.</b> All cached database keys and configurations have been wiped. Send a new connection string to start over."
         )
         return
-
     # Check connection
     helper, session = get_mongo_client(user_id)
     if not helper:
@@ -466,7 +433,6 @@ def handle_callbacks(call):
         
     current_db = session.get("current_db")
     current_coll = session.get("current_coll")
-
     # 1. Main Dashboard Redirection
     if data == "main_menu":
         bot.edit_message_text(
@@ -475,11 +441,16 @@ def handle_callbacks(call):
             text=f"📊 <b>Dashboard Panel</b>\nURI: <code>{safe_html(mask_mongo_url(session['mongo_url']))}</code>",
             reply_markup=get_main_dashboard_markup(session)
         )
-
     # 2. Connection Details
     elif data == "action_conn_details":
         masked = mask_mongo_url(session["mongo_url"])
         log_action(user, "View Connection Details")
+        auth_source = "Default"
+        try:
+            if hasattr(helper.client.options, 'auth_source'):
+                auth_source = helper.client.options.auth_source or "Default"
+        except Exception:
+            pass
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=call.message.message_id,
@@ -488,10 +459,10 @@ def handle_callbacks(call):
                 f"🔗 <b>Full URI:</b> <code>{safe_html(masked)}</code>\n"
                 f"🌐 <b>Active Host:</b> <code>{safe_html(helper.client.address)}</code>\n"
                 f"🛡️ <b>Auth Source:</b> <code>{safe_html(helper.client.options.options.get('authsource', 'Default'))}</code>"
+                f"🛡️ <b>Auth Source:</b> <code>{safe_html(auth_source)}</code>"
             ),
             reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Back", callback_data="main_menu"))
         )
-
     # 3. Server Stats
     elif data == "action_server_stats":
         log_action(user, "Check Server Stats")
@@ -517,7 +488,6 @@ def handle_callbacks(call):
             text=stats_text,
             reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Back", callback_data="main_menu"))
         )
-
     # 4. List Databases
     elif data == "action_list_dbs" or data == "list_dbs":
         log_action(user, "List Databases")
@@ -532,7 +502,6 @@ def handle_callbacks(call):
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=db_text, reply_markup=markup)
         else:
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"❌ <b>Error:</b> {safe_html(dbs)}", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Back", callback_data="main_menu")))
-
     # 5. Select Database (Show DB Menu)
     elif data.startswith("sel_db:"):
         db_name = data.split(":", 1)[1]
@@ -554,7 +523,6 @@ def handle_callbacks(call):
             text=f"📁 <b>Database Manager:</b> <code>{safe_html(db_name)}</code>\n\nChoose an action from the options below:",
             reply_markup=markup
         )
-
     # 6. List Collections in Database
     elif data == "action_list_colls":
         log_action(user, "List Collections", f"DB: {current_db}")
@@ -581,7 +549,6 @@ def handle_callbacks(call):
                 bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=coll_text, reply_markup=markup)
         else:
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"❌ <b>Error:</b> {safe_html(colls)}", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Back", callback_data=f"sel_db:{current_db}")))
-
     # 7. Select Collection
     elif data.startswith("sel_coll:"):
         coll_name = data.split(":", 1)[1]
@@ -590,17 +557,14 @@ def handle_callbacks(call):
         # Clear message to rebuild cleaner page
         bot.delete_message(chat_id, call.message.message_id)
         send_collection_dashboard(chat_id, helper, current_db, coll_name)
-
     # 8. Create Collection prompt
     elif data == "nav_create_coll":
         USER_STATES[user_id] = "WAITING_FOR_CREATE_COLL"
         bot.send_message(chat_id, f"📝 <b>Create Collection inside DB '{safe_html(current_db)}':</b>\n\nPlease send the desired name of the collection to create. Type <code>cancel</code> to abort.")
-
     # 9. Clone Collection prompt
     elif data == "nav_clone":
         USER_STATES[user_id] = "WAITING_FOR_CLONE_COLL"
         bot.send_message(chat_id, f"📋 <b>Clone collection '{safe_html(current_coll)}':</b>\n\nPlease send the name of the TARGET collection where documents should be copied. Target collection must not exist. Type <code>cancel</code> to abort.")
-
     # 10. Document Navigator (View Documents)
     elif data.startswith("nav_docs:"):
         skip = int(data.split(":")[1])
@@ -646,24 +610,20 @@ def handle_callbacks(call):
                 bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=text, reply_markup=markup)
         else:
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"❌ <b>Error:</b> {safe_html(res)}", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("🔙", callback_data="nav_back_coll")))
-
     # 11. Navigation back to active collection menu
     elif data == "nav_back_coll":
         bot.delete_message(chat_id, call.message.message_id)
         send_collection_dashboard(chat_id, helper, current_db, current_coll)
-
     # 12. Insert Document prompt
     elif data == "nav_insert_doc":
         USER_STATES[user_id] = "WAITING_FOR_INSERT_DOC"
         bot.send_message(chat_id, f"➕ <b>Insert Document into '{safe_html(current_coll)}':</b>\n\nPlease send the document JSON object you wish to insert. Example:\n<code>{{\"name\": \"John Doe\", \"role\": \"admin\"}}</code>\n\nType <code>cancel</code> to abort.")
-
     # 13. Edit Document Callback
     elif data.startswith("act_edit_doc:"):
         doc_id = data.split(":", 1)[1]
         USER_STATES[user_id] = "WAITING_FOR_UPDATE_DOC"
         USER_TEMP_DATA[user_id] = doc_id
         bot.send_message(chat_id, f"✍️ <b>Edit Document (ID: {safe_html(doc_id)}):</b>\n\nPlease send the updated JSON document or fields you wish to set. We will execute an update command (e.g. <code>$set</code> update) using your inputs.\n\nType <code>cancel</code> to abort.")
-
     # 14. Delete Document Confirmation
     elif data.startswith("act_del_doc_c:"):
         doc_id = data.split(":", 1)[1]
@@ -678,7 +638,6 @@ def handle_callbacks(call):
             text=f"⚠️ <b>Delete Confirmation</b>\n\nAre you absolutely sure you want to permanently delete the document with ID <code>{safe_html(doc_id)}</code>?",
             reply_markup=markup
         )
-
     # 15. Execute Delete Document
     elif data.startswith("act_del_doc:"):
         doc_id = data.split(":", 1)[1]
@@ -690,17 +649,14 @@ def handle_callbacks(call):
             bot.send_message(chat_id, f"❌ <b>Delete Error:</b>\n<code>{safe_html(msg)}</code>")
         bot.delete_message(chat_id, call.message.message_id)
         send_collection_dashboard(chat_id, helper, current_db, current_coll)
-
     # 16. Custom query prompts
     elif data == "nav_find_query":
         USER_STATES[user_id] = "WAITING_FOR_FIND_QUERY"
         bot.send_message(chat_id, f"📝 <b>Custom Find Query on '{safe_html(current_coll)}':</b>\n\nPlease send your query JSON filter. Example:\n<code>{{\"age\": {{\"$gte\": 21}}, \"gender\": \"male\"}}</code>\n\nType <code>cancel</code> to abort.")
-
     # 17. Aggregation prompts
     elif data == "nav_aggregate":
         USER_STATES[user_id] = "WAITING_FOR_AGGREGATION"
         bot.send_message(chat_id, f"⚙️ <b>Aggregation Pipeline on '{safe_html(current_coll)}':</b>\n\nPlease send your pipeline JSON array. Example:\n<code>[{{\"$match\": {{\"status\": \"active\"}}}}, {{\"$group\": {{\"_id\": \"$category\", \"total\": {{\"$sum\": 1}}}}}}]</code>\n\nType <code>cancel</code> to abort.")
-
     # 18. Export collection records
     elif data == "nav_export":
         log_action(user, "Export Collection", f"DB: {current_db}, Coll: {current_coll}")
@@ -719,7 +675,6 @@ def handle_callbacks(call):
             )
         else:
             bot.send_message(chat_id, f"❌ <b>Export Failed:</b>\n<code>{safe_html(data_str)}</code>")
-
     # 19. Clear Truncate Collection Confirmation
     elif data == "nav_truncate":
         markup = InlineKeyboardMarkup(row_width=2)
@@ -733,7 +688,6 @@ def handle_callbacks(call):
             text=f"🔥 <b>TRUNCATE COLLECTION WARNING!</b>\n\nAre you sure you want to delete <b>ALL</b> documents inside <code>{safe_html(current_db)}.{safe_html(current_coll)}</code>?\nThis cannot be undone!",
             reply_markup=markup
         )
-
     # 20. Execute Truncate
     elif data == "action_truncate_execute":
         log_action(user, "Truncate Collection", f"DB: {current_db}, Coll: {current_coll}")
@@ -746,7 +700,6 @@ def handle_callbacks(call):
             
         bot.delete_message(chat_id, call.message.message_id)
         send_collection_dashboard(chat_id, helper, current_db, current_coll)
-
     # 21. Drop Collection Confirmation
     elif data == "nav_drop_coll":
         markup = InlineKeyboardMarkup(row_width=2)
@@ -760,7 +713,6 @@ def handle_callbacks(call):
             text=f"🚨 <b>DROP COLLECTION WARNING!</b>\n\nAre you sure you want to completely drop collection <code>{safe_html(current_coll)}</code> from database <code>{safe_html(current_db)}</code>?",
             reply_markup=markup
         )
-
     # 22. Execute Drop Collection
     elif data == "action_drop_coll_execute":
         success, msg = helper.drop_collection(current_db, current_coll)
@@ -783,7 +735,6 @@ def handle_callbacks(call):
             bot.send_message(chat_id, f"❌ <b>Error:</b> {safe_html(msg)}")
             bot.delete_message(chat_id, call.message.message_id)
             send_collection_dashboard(chat_id, helper, current_db, current_coll)
-
     # 23. Drop Database Confirmation
     elif data == "action_drop_db_c":
         markup = InlineKeyboardMarkup(row_width=2)
@@ -797,7 +748,6 @@ def handle_callbacks(call):
             text=f"🔥 <b>CRITICAL WARNING: DROP DATABASE</b>\n\nAre you absolutely sure you want to drop database <code>{safe_html(current_db)}</code>? This deletes all collections and files inside it!",
             reply_markup=markup
         )
-
     # 24. Execute Drop Database
     elif data == "action_drop_db_execute":
         success, msg = helper.drop_database(current_db)
@@ -816,18 +766,15 @@ def handle_callbacks(call):
             bot.delete_message(chat_id, call.message.message_id)
             call.data = f"sel_db:{current_db}"
             handle_callbacks(call)
-
     # 25. Indexes Manager
     elif data == "nav_indexes":
         log_action(user, "Manage Indexes", f"DB: {current_db}, Coll: {current_coll}")
         bot.delete_message(chat_id, call.message.message_id)
         send_indexes_menu(chat_id, helper, current_db, current_coll)
-
     # 26. Create Index prompt
     elif data == "nav_create_index":
         USER_STATES[user_id] = "WAITING_FOR_CREATE_INDEX"
         bot.send_message(chat_id, f"➕ <b>Create Index on '{safe_html(current_coll)}':</b>\n\nPlease send the index definition.\nFormat: <code>field1:1,field2:-1</code> (to specify ascending/descending) or optionally append <code>,unique</code> at the end to make it unique.\n\nExample:\n<code>username:1,unique</code>\n\nType <code>cancel</code> to abort.")
-
     # 27. Drop Index Callback
     elif data.startswith("drop_idx:"):
         idx_name = data.split(":", 1)[1]
@@ -839,10 +786,8 @@ def handle_callbacks(call):
             bot.send_message(chat_id, f"❌ <b>Error:</b> {safe_html(msg)}")
         bot.delete_message(chat_id, call.message.message_id)
         send_indexes_menu(chat_id, helper, current_db, current_coll)
-
     # Close DB helper client
     helper.close()
-
 # Start bot polling
 if __name__ == '__main__':
     print("🤖 MongoDB URL Reader bot starting...")
